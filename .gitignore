@@ -1,0 +1,91 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.suo
+*.user
+*.userprefs
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+*.vs/
+
+# Build Artifacts - C++ / CMake
+build/
+**/build/
+CMakeFiles/
+**/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install/
+compile_commands.json
+
+# Compiled Output
+*.o
+*.obj
+*.ko
+*.mod.c
+*.mod
+*.elf
+*.s
+*.ll
+*.bc
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+*.map
+
+# Python-specific
+__pycache__/
+*.pyc
+*.pyo
+.Python/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+dist/
+*.egg-info/
+
+# Temporary Files
+*~
+#*#
+.~*
+*.bak
+*.swp
+*.tmp
+tmp/
+temp/
+*temp*
+
+# Log Files
+*.log
+log/
+
+# Test Artifacts
+Testing/
+_CPack_Packages/
+
+# Dependency Management (General)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Miscellaneous
+.DS_Store
+.history/
+.cache/
+.project
+.settings/
+.classpath
+.cproject
