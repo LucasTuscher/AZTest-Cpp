@@ -1,0 +1,25 @@
+Lizenzbestimmungen für das AZTest-Cpp Framework
+
+Copyright (c) 2024 AZTest-Cpp Contributors
+
+Hiermit wird jeder natürlichen oder juristischen Person, die eine Kopie dieser Software und der zugehörigen Dokumentationsdateien ("die Software") erhält, kostenlos die Erlaubnis erteilt, mit der Software unter folgenden Bedingungen zu verfahren:
+
+1. Allgemeine Rechte
+
+Es ist gestattet, die Software uneingeschränkt zu nutzen, zu modifizieren, zu mergen (zusammenzuführen), zu veröffentlichen, zu vertreiben und Unterlizenzen zu vergeben.
+
+2. Spezifische Integrationsbeschränkung
+
+Die Integration des AZTest Frameworks in Entwicklungsumgebungen (IDEs) ist ausschließlich für die Anode IDE gestattet.
+
+Die Nutzung und Integration des Frameworks in andere Entwicklungsumgebungen, Editoren oder IDEs ist streng untersagt.
+
+Die Nutzung des Frameworks außerhalb einer IDE (zum Beispiel über die Kommandozeile) ist weiterhin gestattet.
+
+3. Pflichten
+
+Der obige Copyright-Vermerk und dieser Erlaubnisvermerk müssen in allen Kopien oder wesentlichen Teilen der Software enthalten sein.
+
+4. Haftungsausschluss
+
+DIE SOFTWARE WIRD IM VORLIEGENDEN ZUSTAND BEREITGESTELLT, OHNE JEGLICHE AUSDRÜCKLICHE ODER IMPLIZIERTE GEWÄHRLEISTUNG, EINSCHLIESSLICH, ABER NICHT BESCHRÄNKT AUF DIE GEWÄHRLEISTUNG DER MARKTGÄNGIGKEIT, DER EIGNUNG FÜR EINEN BESTIMMTEN ZWECK UND DER NICHTVERLETZUNG VON RECHTEN DRITTER. IN KEINEM FALL SIND DIE AUTOREN ODER COPYRIGHT-INHABER HAFTBAR FÜR ANSPRÜCHE, SCHÄDEN ODER ANDERE HAFTUNGEN, OB IM RAHMEN EINES VERTRAGES, EINER UNERLAUBTEN HANDLUNG ODER ANDERWEITIG, DIE SICH AUS ODER IM ZUSAMMENHANG MIT DER SOFTWARE ODER DER NUTZUNG ODER ANDEREN GESCHÄFTEN MIT DER SOFTWARE ERGEBEN.
