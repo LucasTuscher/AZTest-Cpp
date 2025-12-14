@@ -1,5 +1,0 @@
-BasicExample 1 0.322425
-AdvancedExample 1 0.26723
-FixtureExample 1 0.25669
-FeaturesExample 1 0.22713
----
