@@ -91,6 +91,18 @@ void JSONReporter::WriteResults(const std::vector<Core::TestResult>& results, do
         file << "      \"file\": \"" << Escape(r.fileName) << "\",\n";
         file << "      \"line\": " << r.lineNumber << ",\n";
         file << "      \"failure_message\": \"" << Escape(r.failureMessage) << "\",\n";
+        file << "      \"failures\": [\n";
+        for (size_t fi = 0; fi < r.failures.size(); ++fi) {
+            const auto& f = r.failures[fi];
+            file << "        {\n";
+            file << "          \"file\": \"" << Escape(f.fileName) << "\",\n";
+            file << "          \"line\": " << f.lineNumber << ",\n";
+            file << "          \"message\": \"" << Escape(f.message) << "\"\n";
+            file << "        }";
+            if (fi + 1 < r.failures.size()) file << ",";
+            file << "\n";
+        }
+        file << "      ],\n";
         file << "      \"slow\": " << (r.slow ? "true" : "false") << ",\n";
         file << "      \"warning_message\": \"" << Escape(r.warningMessage) << "\"\n";
         file << "    }";

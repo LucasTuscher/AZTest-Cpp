@@ -8,7 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Compiler warnings
 if(MSVC)
-    add_compile_options(/W4)
+    add_compile_options(/W4 /D_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -29,6 +29,10 @@ set(AZTEST_HEADERS
     include/AZTest/Reporters/CallbackReporter.h
     include/AZTest/Utils/Benchmark.h
     include/AZTest/UEIntegration.h
+    include/AZTest/Matchers.h
+    include/AZTest/Mock.h
+    include/AZTest/PropertyTest.h
+    include/AZTest/Environment.h
 )
 
 set(AZTEST_SOURCES

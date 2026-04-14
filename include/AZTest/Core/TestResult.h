@@ -2,6 +2,7 @@
 
 #include <string>
 #include <chrono>
+ #include <vector>
 
 namespace AZTest {
 namespace Core {
@@ -13,6 +14,15 @@ enum class TestStatus {
     CRASHED
 };
 
+struct TestFailure {
+    std::string message;
+    std::string fileName;
+    int lineNumber;
+
+    TestFailure()
+        : lineNumber(0) {}
+};
+
 struct TestResult {
     std::string testName;
     std::string suiteName;
@@ -20,6 +30,7 @@ struct TestResult {
     std::string failureMessage;
     std::string fileName;
     int lineNumber;
+    std::vector<TestFailure> failures;
     double executionTimeMs;
     bool slow;
     std::string warningMessage;

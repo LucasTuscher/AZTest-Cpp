@@ -51,10 +51,18 @@ void ConsoleReporter::OnTestEnd(const Core::TestResult& result) {
     // Show failure details
     if (result.Failed() || result.Skipped() || result.slow) {
         const char* detailColor = result.Failed() ? Color::Red() : (result.Skipped() ? Color::Yellow() : Color::Yellow());
-        std::cout << GetColor(detailColor)
-                  << "      " << result.fileName << ":" << result.lineNumber << "\n";
-        if (result.Failed() || result.Skipped()) {
-            std::cout << "      " << result.failureMessage << "\n";
+        if (result.Failed() && !result.failures.empty()) {
+            for (const auto& f : result.failures) {
+                std::cout << GetColor(detailColor)
+                          << "      " << f.fileName << ":" << f.lineNumber << "\n";
+                std::cout << "      " << f.message << "\n";
+            }
+        } else {
+            std::cout << GetColor(detailColor)
+                      << "      " << result.fileName << ":" << result.lineNumber << "\n";
+            if (result.Failed() || result.Skipped()) {
+                std::cout << "      " << result.failureMessage << "\n";
+            }
         }
         if (result.slow) {
             std::cout << "      " << (result.warningMessage.empty() ? "Slow test" : result.warningMessage) << "\n";

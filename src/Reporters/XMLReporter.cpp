@@ -67,10 +67,19 @@ void XMLReporter::OnTestSuiteEnd(const std::string& suiteName) {
 
         if (result.Failed()) {
             file_ << ">\n";
-            file_ << "      <failure message=\"" << EscapeXML(result.failureMessage) << "\">\n";
-            file_ << EscapeXML(result.fileName) << ":" << result.lineNumber << "\n";
-            file_ << EscapeXML(result.failureMessage) << "\n";
-            file_ << "      </failure>\n";
+            if (!result.failures.empty()) {
+                for (const auto& f : result.failures) {
+                    file_ << "      <failure message=\"" << EscapeXML(f.message) << "\">\n";
+                    file_ << EscapeXML(f.fileName) << ":" << f.lineNumber << "\n";
+                    file_ << EscapeXML(f.message) << "\n";
+                    file_ << "      </failure>\n";
+                }
+            } else {
+                file_ << "      <failure message=\"" << EscapeXML(result.failureMessage) << "\">\n";
+                file_ << EscapeXML(result.fileName) << ":" << result.lineNumber << "\n";
+                file_ << EscapeXML(result.failureMessage) << "\n";
+                file_ << "      </failure>\n";
+            }
             file_ << "    </testcase>\n";
         } else if (result.Skipped()) {
             file_ << ">\n";

@@ -14,7 +14,12 @@
 #include "Reporters/ConsoleReporter.h"
 #include "Reporters/XMLReporter.h"
 #include "Reporters/JSONReporter.h"
+#include "Reporters/CallbackReporter.h"
 #include "Utils/Benchmark.h"
+#include "Matchers.h"
+#include "Mock.h"
+#include "PropertyTest.h"
+#include "Environment.h"
 
 #include <sstream>
 #include <stdexcept>
@@ -26,6 +31,16 @@
 #include <type_traits>
 #include <utility>
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <csignal>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 // ============================================================================
 // HELPER MACROS
@@ -83,6 +98,26 @@ struct HasSize : std::false_type {};
 template <typename T>
 struct HasSize<T, std::void_t<decltype(std::declval<T>().size())>> : std::true_type {};
 
+template <typename T> struct IsPair : std::false_type {};
+template <typename T1, typename T2> struct IsPair<std::pair<T1, T2>> : std::true_type {};
+
+template <typename T> struct IsTuple : std::false_type {};
+template <typename... Args> struct IsTuple<std::tuple<Args...>> : std::true_type {};
+
+template <typename Tuple, size_t... Is>
+inline std::string TupleToStringImpl(const Tuple& t, std::index_sequence<Is...>) {
+    std::ostringstream oss;
+    oss << "(";
+    ((oss << (Is == 0 ? "" : ", ") << AZTest::Detail::ToString(std::get<Is>(t))), ...);
+    oss << ")";
+    return oss.str();
+}
+
+template <typename... Args>
+inline std::string TupleToString(const std::tuple<Args...>& t) {
+    return TupleToStringImpl(t, std::make_index_sequence<sizeof...(Args)>{});
+}
+
 template <typename T>
 std::string ToString(const T& value);
 
@@ -116,6 +151,10 @@ inline std::string ToString(const T& value) {
         return value ? "true" : "false";
     } else if constexpr (HasBegin<Decayed>::value && !std::is_same_v<Decayed, std::string>) {
         return JoinContainer(value);
+    } else if constexpr (Detail::IsPair<Decayed>::value) {
+        return "(" + AZTest::Detail::ToString(value.first) + ", " + AZTest::Detail::ToString(value.second) + ")";
+    } else if constexpr (Detail::IsTuple<Decayed>::value) {
+        return Detail::TupleToString(value);
     } else {
         std::ostringstream oss;
         oss << value;
@@ -334,6 +373,48 @@ public:
         static AZTEST_UNIQUE_NAME(AZTestParamInstantiation_) AZTEST_UNIQUE_NAME(engineTestParamInstance_); \
     }
 
+// Type-parametrized tests
+#define TYPED_TEST_SUITE(suite_name, ...) \
+    using AZTEST_CONCAT(AZTestTypeSuite_, suite_name) = std::tuple<__VA_ARGS__>; \
+    template <typename T> class suite_name : public AZTest::Core::TestFixture {}
+
+#define TYPED_TEST(suite_name, test_name) \
+    template <typename T> \
+    class AZTEST_PARAM_FUNC_NAME(suite_name, test_name) : public suite_name<T> { \
+    public: \
+        void RunTest(); \
+        void RunWithLifecycle() { \
+            bool setUpDone = false; \
+            try { this->SetUp(); setUpDone = true; RunTest(); this->TearDown(); } \
+            catch (...) { if (setUpDone) { try { this->TearDown(); } catch(...) {} } throw; } \
+        } \
+    }; \
+    namespace { \
+        template<typename Tuple, std::size_t... I> \
+        void AZTEST_CONCAT3(AZTestTypeReg_, suite_name, _##test_name)(std::index_sequence<I...>) { \
+            (AZTest::Core::TestRegistry::Instance().RegisterTest( \
+                std::string(#test_name) + "<" + typeid(std::tuple_element_t<I, Tuple>).name() + ">", \
+                #suite_name, \
+                []() { \
+                    AZTEST_PARAM_FUNC_NAME(suite_name, test_name)<std::tuple_element_t<I, Tuple>> fixture; \
+                    fixture.RunWithLifecycle(); \
+                }, \
+                __FILE__, __LINE__ \
+            ), ...); \
+        } \
+        struct AZTEST_PARAM_REG_NAME(suite_name, test_name) { \
+            AZTEST_PARAM_REG_NAME(suite_name, test_name)() { \
+                using Types = AZTEST_CONCAT(AZTestTypeSuite_, suite_name); \
+                AZTEST_CONCAT3(AZTestTypeReg_, suite_name, _##test_name)<Types>( \
+                    std::make_index_sequence<std::tuple_size_v<Types>>{} \
+                ); \
+            } \
+        }; \
+        static AZTEST_PARAM_REG_NAME(suite_name, test_name) AZTEST_UNIQUE_NAME(typeTestInst_); \
+    } \
+    template <typename TypeParam> \
+    void AZTEST_PARAM_FUNC_NAME(suite_name, test_name)<TypeParam>::RunTest()
+
 // ============================================================================
 // EXPECT MACROS (Continue on failure)
 // ============================================================================
@@ -493,6 +574,78 @@ public:
         } \
     } while(0)
 
+#define EXPECT_FLOAT_EQ(val1, val2) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val1_) = static_cast<float>(val1); \
+        auto AZTEST_UNIQUE_NAME(et_val2_) = static_cast<float>(val2); \
+        auto AZTEST_UNIQUE_NAME(et_diff_) = std::fabs(AZTEST_UNIQUE_NAME(et_val1_) - AZTEST_UNIQUE_NAME(et_val2_)); \
+        float AZTEST_UNIQUE_NAME(et_max_) = std::max(std::fabs(AZTEST_UNIQUE_NAME(et_val1_)), std::fabs(AZTEST_UNIQUE_NAME(et_val2_))); \
+        float AZTEST_UNIQUE_NAME(et_tol_) = 4.0f * std::numeric_limits<float>::epsilon() * AZTEST_UNIQUE_NAME(et_max_); \
+        if (AZTEST_UNIQUE_NAME(et_tol_) < std::numeric_limits<float>::epsilon()) AZTEST_UNIQUE_NAME(et_tol_) = std::numeric_limits<float>::epsilon(); \
+        if (AZTEST_UNIQUE_NAME(et_diff_) > AZTEST_UNIQUE_NAME(et_tol_)) { \
+            std::stringstream ss; \
+            ss << "Expected float equality: " #val1 " == " #val2 "\n" \
+               << "      Actual: " << AZTEST_UNIQUE_NAME(et_val1_) << " vs " << AZTEST_UNIQUE_NAME(et_val2_) << " (diff: " << AZTEST_UNIQUE_NAME(et_diff_) << ", tol: " << AZTEST_UNIQUE_NAME(et_tol_) << ")"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define EXPECT_DOUBLE_EQ(val1, val2) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val1_) = static_cast<double>(val1); \
+        auto AZTEST_UNIQUE_NAME(et_val2_) = static_cast<double>(val2); \
+        auto AZTEST_UNIQUE_NAME(et_diff_) = std::fabs(AZTEST_UNIQUE_NAME(et_val1_) - AZTEST_UNIQUE_NAME(et_val2_)); \
+        double AZTEST_UNIQUE_NAME(et_max_) = std::max(std::fabs(AZTEST_UNIQUE_NAME(et_val1_)), std::fabs(AZTEST_UNIQUE_NAME(et_val2_))); \
+        double AZTEST_UNIQUE_NAME(et_tol_) = 4.0 * std::numeric_limits<double>::epsilon() * AZTEST_UNIQUE_NAME(et_max_); \
+        if (AZTEST_UNIQUE_NAME(et_tol_) < std::numeric_limits<double>::epsilon()) AZTEST_UNIQUE_NAME(et_tol_) = std::numeric_limits<double>::epsilon(); \
+        if (AZTEST_UNIQUE_NAME(et_diff_) > AZTEST_UNIQUE_NAME(et_tol_)) { \
+            std::stringstream ss; \
+            ss << "Expected double equality: " #val1 " == " #val2 "\n" \
+               << "      Actual: " << AZTEST_UNIQUE_NAME(et_val1_) << " vs " << AZTEST_UNIQUE_NAME(et_val2_) << " (diff: " << AZTEST_UNIQUE_NAME(et_diff_) << ", tol: " << AZTEST_UNIQUE_NAME(et_tol_) << ")"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define EXPECT_NAN(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isnan(AZTEST_UNIQUE_NAME(et_val_))) { \
+            std::stringstream ss; \
+            ss << "Expected NaN, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define EXPECT_INF(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || AZTEST_UNIQUE_NAME(et_val_) < 0) { \
+            std::stringstream ss; \
+            ss << "Expected positive infinity, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define EXPECT_NINF(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || AZTEST_UNIQUE_NAME(et_val_) > 0) { \
+            std::stringstream ss; \
+            ss << "Expected negative infinity, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define EXPECT_FINITE(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || std::isnan(AZTEST_UNIQUE_NAME(et_val_))) { \
+            std::stringstream ss; \
+            ss << "Expected finite value, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
 #define EXPECT_CONTAINS(haystack, needle) \
     do { \
         auto&& AZTEST_UNIQUE_NAME(et_h_) = (haystack); \
@@ -561,17 +714,25 @@ public:
 
 #define EXPECT_THROW(statement, exception_type) \
     do { \
-        bool thrown = false; \
+        bool AZTEST_UNIQUE_NAME(caughtKind_) = false; \
+        bool AZTEST_UNIQUE_NAME(caughtAny_) = false; \
+        std::string AZTEST_UNIQUE_NAME(caughtWhat_); \
         try { \
             statement; \
         } catch (const exception_type&) { \
-            thrown = true; \
+            AZTEST_UNIQUE_NAME(caughtKind_) = true; \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+        } catch (const std::exception& e) { \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+            AZTEST_UNIQUE_NAME(caughtWhat_) = e.what(); \
         } catch (...) { \
-            thrown = true; \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+            AZTEST_UNIQUE_NAME(caughtWhat_) = "unknown exception type"; \
         } \
-        if (!thrown) { \
+        if (!AZTEST_UNIQUE_NAME(caughtKind_)) { \
             std::stringstream ss; \
-            ss << "Expected exception: " #exception_type " was not thrown"; \
+            if (!AZTEST_UNIQUE_NAME(caughtAny_)) ss << "Expected exception of type " #exception_type " but none was thrown."; \
+            else ss << "Expected exception of type " #exception_type " but caught a different one: " << AZTEST_UNIQUE_NAME(caughtWhat_); \
             AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
         } \
     } while(0)
@@ -768,19 +929,105 @@ private:
         } \
     } while(0)
 
+#define ASSERT_FLOAT_EQ(val1, val2) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val1_) = static_cast<float>(val1); \
+        auto AZTEST_UNIQUE_NAME(et_val2_) = static_cast<float>(val2); \
+        auto AZTEST_UNIQUE_NAME(et_diff_) = std::fabs(AZTEST_UNIQUE_NAME(et_val1_) - AZTEST_UNIQUE_NAME(et_val2_)); \
+        float AZTEST_UNIQUE_NAME(et_max_) = std::max(std::fabs(AZTEST_UNIQUE_NAME(et_val1_)), std::fabs(AZTEST_UNIQUE_NAME(et_val2_))); \
+        float AZTEST_UNIQUE_NAME(et_tol_) = 4.0f * std::numeric_limits<float>::epsilon() * AZTEST_UNIQUE_NAME(et_max_); \
+        if (AZTEST_UNIQUE_NAME(et_tol_) < std::numeric_limits<float>::epsilon()) AZTEST_UNIQUE_NAME(et_tol_) = std::numeric_limits<float>::epsilon(); \
+        if (AZTEST_UNIQUE_NAME(et_diff_) > AZTEST_UNIQUE_NAME(et_tol_)) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: float equality: " #val1 " == " #val2 "\n" \
+               << "      Actual: " << AZTEST_UNIQUE_NAME(et_val1_) << " vs " << AZTEST_UNIQUE_NAME(et_val2_) << " (diff: " << AZTEST_UNIQUE_NAME(et_diff_) << ", tol: " << AZTEST_UNIQUE_NAME(et_tol_) << ")"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+#define ASSERT_DOUBLE_EQ(val1, val2) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val1_) = static_cast<double>(val1); \
+        auto AZTEST_UNIQUE_NAME(et_val2_) = static_cast<double>(val2); \
+        auto AZTEST_UNIQUE_NAME(et_diff_) = std::fabs(AZTEST_UNIQUE_NAME(et_val1_) - AZTEST_UNIQUE_NAME(et_val2_)); \
+        double AZTEST_UNIQUE_NAME(et_max_) = std::max(std::fabs(AZTEST_UNIQUE_NAME(et_val1_)), std::fabs(AZTEST_UNIQUE_NAME(et_val2_))); \
+        double AZTEST_UNIQUE_NAME(et_tol_) = 4.0 * std::numeric_limits<double>::epsilon() * AZTEST_UNIQUE_NAME(et_max_); \
+        if (AZTEST_UNIQUE_NAME(et_tol_) < std::numeric_limits<double>::epsilon()) AZTEST_UNIQUE_NAME(et_tol_) = std::numeric_limits<double>::epsilon(); \
+        if (AZTEST_UNIQUE_NAME(et_diff_) > AZTEST_UNIQUE_NAME(et_tol_)) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: double equality: " #val1 " == " #val2 "\n" \
+               << "      Actual: " << AZTEST_UNIQUE_NAME(et_val1_) << " vs " << AZTEST_UNIQUE_NAME(et_val2_) << " (diff: " << AZTEST_UNIQUE_NAME(et_diff_) << ", tol: " << AZTEST_UNIQUE_NAME(et_tol_) << ")"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+#define ASSERT_NAN(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isnan(AZTEST_UNIQUE_NAME(et_val_))) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: expected NaN, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+#define ASSERT_INF(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || AZTEST_UNIQUE_NAME(et_val_) < 0) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: expected positive infinity, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+#define ASSERT_NINF(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (!std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || AZTEST_UNIQUE_NAME(et_val_) > 0) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: expected negative infinity, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+#define ASSERT_FINITE(val) \
+    do { \
+        auto AZTEST_UNIQUE_NAME(et_val_) = (val); \
+        if (std::isinf(AZTEST_UNIQUE_NAME(et_val_)) || std::isnan(AZTEST_UNIQUE_NAME(et_val_))) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: expected finite value, got: " << AZTEST_UNIQUE_NAME(et_val_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
 #define ASSERT_THROW(statement, exception_type) \
     do { \
-        bool thrown = false; \
+        bool AZTEST_UNIQUE_NAME(caughtKind_) = false; \
+        bool AZTEST_UNIQUE_NAME(caughtAny_) = false; \
+        std::string AZTEST_UNIQUE_NAME(caughtWhat_); \
         try { \
             statement; \
         } catch (const exception_type&) { \
-            thrown = true; \
+            AZTEST_UNIQUE_NAME(caughtKind_) = true; \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+        } catch (const std::exception& e) { \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+            AZTEST_UNIQUE_NAME(caughtWhat_) = e.what(); \
         } catch (...) { \
-            thrown = true; \
+            AZTEST_UNIQUE_NAME(caughtAny_) = true; \
+            AZTEST_UNIQUE_NAME(caughtWhat_) = "unknown exception type"; \
         } \
-        if (!thrown) { \
+        if (!AZTEST_UNIQUE_NAME(caughtKind_)) { \
             std::stringstream ss; \
-            ss << "Assertion failed: expected exception " #exception_type " was not thrown"; \
+            if (!AZTEST_UNIQUE_NAME(caughtAny_)) ss << "Assertion failed: expected exception of type " #exception_type " but none was thrown."; \
+            else ss << "Assertion failed: expected exception of type " #exception_type " but caught a different one: " << AZTEST_UNIQUE_NAME(caughtWhat_); \
             AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
             throw AZTest::AssertionFailure(ss.str()); \
         } \
@@ -911,6 +1158,138 @@ private:
     } while(0)
 
 // ============================================================================
+// DEATH TESTS
+// ============================================================================
+
+namespace AZTest {
+namespace Detail {
+
+#ifdef _WIN32
+// Windows SEH-based death test
+template<typename F>
+inline bool ExecuteDeathTest(F&& f, std::string& deathMessage) {
+    __try {
+        f();
+        // If we get here, no exception occurred
+        deathMessage = "Function did not die";
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        DWORD code = GetExceptionCode();
+        switch (code) {
+            case EXCEPTION_ACCESS_VIOLATION:
+                deathMessage = "Access violation";
+                break;
+            case EXCEPTION_INT_DIVIDE_BY_ZERO:
+                deathMessage = "Integer divide by zero";
+                break;
+            case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+                deathMessage = "Floating point divide by zero";
+                break;
+            case EXCEPTION_STACK_OVERFLOW:
+                deathMessage = "Stack overflow";
+                break;
+            case EXCEPTION_ILLEGAL_INSTRUCTION:
+                deathMessage = "Illegal instruction";
+                break;
+            default:
+                deathMessage = "SEH exception (code: " + std::to_string(code) + ")";
+                break;
+        }
+        return true;
+    }
+}
+#else
+// POSIX signal-based death test
+volatile sig_atomic_t deathTestSignal = 0;
+
+void DeathTestSignalHandler(int sig) {
+    deathTestSignal = sig;
+    // Jump back to the test - use longjmp
+    // Note: This is a simplified version. For production, use siglongjmp
+    std::abort();
+}
+
+template<typename F>
+inline bool ExecuteDeathTest(F&& f, std::string& deathMessage) {
+    // Save original handlers
+    void (*oldAbortHandler)(int) = std::signal(SIGABRT, DeathTestSignalHandler);
+    void (*oldSegvHandler)(int) = std::signal(SIGSEGV, DeathTestSignalHandler);
+    void (*oldFpeHandler)(int) = std::signal(SIGFPE, DeathTestSignalHandler);
+    void (*oldIllHandler)(int) = std::signal(SIGILL, DeathTestSignalHandler);
+    
+    deathTestSignal = 0;
+    bool died = false;
+    
+    // Note: In a real implementation, we'd use sigsetjmp/siglongjmp
+    // For now, we catch signals that don't crash the process
+    try {
+        f();
+        // If we get here, no immediate crash
+        if (deathTestSignal != 0) {
+            died = true;
+            switch (deathTestSignal) {
+                case SIGABRT: deathMessage = "SIGABRT"; break;
+                case SIGSEGV: deathMessage = "SIGSEGV"; break;
+                case SIGFPE: deathMessage = "SIGFPE"; break;
+                case SIGILL: deathMessage = "SIGILL"; break;
+                default: deathMessage = "Signal " + std::to_string(deathTestSignal); break;
+            }
+        } else {
+            deathMessage = "Function did not die";
+        }
+    } catch (...) {
+        // C++ exceptions don't count as "death" for death tests
+        deathMessage = "Function did not die (threw exception)";
+    }
+    
+    // Restore original handlers
+    std::signal(SIGABRT, oldAbortHandler);
+    std::signal(SIGSEGV, oldSegvHandler);
+    std::signal(SIGFPE, oldFpeHandler);
+    std::signal(SIGILL, oldIllHandler);
+    
+    return died;
+}
+#endif
+
+} // namespace Detail
+} // namespace AZTest
+
+#define EXPECT_DEATH(statement, expected_message_substring) \
+    do { \
+        std::string AZTEST_UNIQUE_NAME(deathMsg_); \
+        bool AZTEST_UNIQUE_NAME(died_) = AZTest::Detail::ExecuteDeathTest([&]() { statement; }, AZTEST_UNIQUE_NAME(deathMsg_)); \
+        if (!AZTEST_UNIQUE_NAME(died_)) { \
+            std::stringstream ss; \
+            ss << "Expected death, but function did not die"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } else if (AZTEST_UNIQUE_NAME(deathMsg_).find(expected_message_substring) == std::string::npos && std::string(expected_message_substring) != "*") { \
+            std::stringstream ss; \
+            ss << "Expected death with message containing: " << (expected_message_substring) << "\n" \
+               << "      Actual death: " << AZTEST_UNIQUE_NAME(deathMsg_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+        } \
+    } while(0)
+
+#define ASSERT_DEATH(statement, expected_message_substring) \
+    do { \
+        std::string AZTEST_UNIQUE_NAME(deathMsg_); \
+        bool AZTEST_UNIQUE_NAME(died_) = AZTest::Detail::ExecuteDeathTest([&]() { statement; }, AZTEST_UNIQUE_NAME(deathMsg_)); \
+        if (!AZTEST_UNIQUE_NAME(died_)) { \
+            std::stringstream ss; \
+            ss << "Assertion failed: Expected death, but function did not die"; \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } else if (AZTEST_UNIQUE_NAME(deathMsg_).find(expected_message_substring) == std::string::npos && std::string(expected_message_substring) != "*") { \
+            std::stringstream ss; \
+            ss << "Assertion failed: Expected death with message containing: " << (expected_message_substring) << "\n" \
+               << "      Actual death: " << AZTEST_UNIQUE_NAME(deathMsg_); \
+            AZTest::Core::TestRegistry::Instance().RecordFailure(ss.str(), __FILE__, __LINE__); \
+            throw AZTest::AssertionFailure(ss.str()); \
+        } \
+    } while(0)
+
+// ============================================================================
 // BENCHMARKING
 // ============================================================================
 
@@ -957,6 +1336,62 @@ inline void InitializeWithReporters(std::vector<std::shared_ptr<Core::IReporter>
 }
 
 /**
+ * @brief Add a global test environment. 
+ * The framework takes ownership of the pointer and deletes it when finished.
+ */
+inline void AddGlobalTestEnvironment(AZTest::Environment* env) {
+    AZTest::Core::TestRegistry::Instance().AddEnvironment(env);
+}
+
+
+inline const char* VersionString() {
+    return "2.0";
+}
+
+namespace Detail {
+
+/// Determine if stdout appears to be a terminal (Windows-safe).
+/// Used for --color=auto heuristics.
+inline bool IsStdoutTty() {
+#ifdef _WIN32
+    DWORD mode = 0;
+    HANDLE hOut = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) return false;
+    return ::GetConsoleMode(hOut, &mode) != 0;
+#else
+    return isatty(STDOUT_FILENO) != 0;
+#endif
+}
+
+/// Determine if colors should be used with --color=auto.
+/// Checks TTY status and common CI environment variables.
+inline bool ShouldUseColorAuto() {
+    // Respect NO_COLOR (https://no-color.org/)
+    if (const char* noColor = std::getenv("NO_COLOR"); noColor && *noColor) {
+        return false;
+    }
+    // Respect CLICOLOR_FORCE (force colors)
+    if (const char* force = std::getenv("CLICOLOR_FORCE"); force && *force) {
+        return true;
+    }
+    // Respect CLICOLOR (disable if set to 0)
+    if (const char* cliColor = std::getenv("CLICOLOR"); cliColor && std::strcmp(cliColor, "0") == 0) {
+        return false;
+    }
+    // CI environments usually want colors even if not a TTY
+    const char* ciVars[] = {"CI", "GITHUB_ACTIONS", "GITLAB_CI", "TRAVIS", "CIRCLECI", "APPVEYOR", "TF_BUILD", "AGENT_NAME"};
+    for (const char* var : ciVars) {
+        if (const char* val = std::getenv(var); val && *val) {
+            return true;
+        }
+    }
+    // Otherwise, use TTY detection
+    return IsStdoutTty();
+}
+
+} // namespace Detail
+
+/**
  * @brief Run tests with simple command line support.
  *
  * Supported flags:
@@ -976,43 +1411,161 @@ inline void InitializeWithReporters(std::vector<std::shared_ptr<Core::IReporter>
 inline int RunWithArgs(int argc, char** argv) {
     std::string filter;
     bool listOnly = false;
+    bool listSuitesOnly = false;
     bool shuffle = false;
     uint64_t seed = 0;
     int repeat = 1;
     bool failFast = false;
+    bool runDisabled = false;
     double slowWarnMs = 0.0;
     double timeoutMs = 0.0;
     std::vector<std::string> jsonOutputs;
     std::vector<std::string> xmlOutputs;
-    bool useColors = true;
+    enum class ColorMode { Auto, Always, Never };
+    ColorMode colorMode = ColorMode::Auto;
+
+    auto PrintHelp = []() {
+        std::cout
+            << "AZTest " << VersionString() << "\n"
+            << "Usage: <test-binary> [options]\n\n"
+            << "Options:\n"
+            << "  --help                 Show this help and exit\n"
+            << "  --version              Show version and exit\n"
+            << "  --list                 List tests (grouped by suite) and exit\n"
+            << "  --list_suites          List unique suites and exit\n"
+            << "  --filter <pattern>     Wildcard filter (e.g. Physics.*, *.SlowTest)\n"
+            << "  --filter=<pattern>     Same as above\n"
+            << "  --shuffle              Shuffle test order\n"
+            << "  --seed <n>             Seed for shuffling\n"
+            << "  --seed=<n>             Same as above\n"
+            << "  --repeat <n>           Repeat all tests n times\n"
+            << "  --repeat=<n>           Same as above\n"
+            << "  --fail_fast            Stop on first failure\n"
+            << "  --run_disabled         Run DISABLED_ tests instead of skipping\n"
+            << "  --slow <ms>            Warn for tests slower than this threshold\n"
+            << "  --slow=<ms>            Same as above\n"
+            << "  --timeout <ms>         Fail tests that exceed this runtime\n"
+            << "  --timeout=<ms>         Same as above\n"
+            << "  --json <path>          Write results as JSON to path\n"
+            << "  --json=<path>          Same as above\n"
+            << "  --xml <path>           Write results as JUnit XML to path\n"
+            << "  --xml=<path>           Same as above\n"
+            << "  --color <mode>         auto|always|never (default: auto)\n"
+            << "  --color=<mode>         Same as above\n";
+    };
+
+    auto ParseColorMode = [](const std::string& value, ColorMode& out) -> bool {
+        if (value == "auto") {
+            out = ColorMode::Auto;
+            return true;
+        }
+        if (value == "always") {
+            out = ColorMode::Always;
+            return true;
+        }
+        if (value == "never") {
+            out = ColorMode::Never;
+            return true;
+        }
+        return false;
+    };
+
+    auto RequireValue = [&](int& i, const std::string& flag) -> const char* {
+        if (i + 1 >= argc) {
+            std::cerr << "Missing value for " << flag << "\n";
+            return nullptr;
+        }
+        return argv[++i];
+    };
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg.rfind("--filter=", 0) == 0) {
+
+        if (arg == "--help" || arg == "-h") {
+            PrintHelp();
+            return 0;
+        } else if (arg == "--version") {
+            std::cout << "AZTest " << VersionString() << "\n";
+            return 0;
+        } else if (arg.rfind("--filter=", 0) == 0) {
             filter = arg.substr(std::string("--filter=").size());
         } else if (arg == "--filter" && i + 1 < argc) {
             filter = argv[++i];
         } else if (arg == "--list") {
             listOnly = true;
+        } else if (arg == "--list_suites") {
+            listSuitesOnly = true;
         } else if (arg == "--shuffle") {
             shuffle = true;
+        } else if (arg == "--seed") {
+            const char* v = RequireValue(i, "--seed");
+            if (!v) return 2;
+            seed = static_cast<uint64_t>(std::stoull(v));
         } else if (arg.rfind("--seed=", 0) == 0) {
             seed = static_cast<uint64_t>(std::stoull(arg.substr(std::string("--seed=").size())));
+        } else if (arg == "--repeat") {
+            const char* v = RequireValue(i, "--repeat");
+            if (!v) return 2;
+            repeat = std::max(1, std::stoi(v));
         } else if (arg.rfind("--repeat=", 0) == 0) {
             repeat = std::max(1, std::stoi(arg.substr(std::string("--repeat=").size())));
         } else if (arg == "--fail_fast") {
             failFast = true;
+        } else if (arg == "--run_disabled") {
+            runDisabled = true;
+        } else if (arg == "--slow") {
+            const char* v = RequireValue(i, "--slow");
+            if (!v) return 2;
+            slowWarnMs = std::stod(v);
         } else if (arg.rfind("--slow=", 0) == 0) {
             slowWarnMs = std::stod(arg.substr(std::string("--slow=").size()));
+        } else if (arg == "--timeout") {
+            const char* v = RequireValue(i, "--timeout");
+            if (!v) return 2;
+            timeoutMs = std::stod(v);
         } else if (arg.rfind("--timeout=", 0) == 0) {
             timeoutMs = std::stod(arg.substr(std::string("--timeout=").size()));
+        } else if (arg == "--json") {
+            const char* v = RequireValue(i, "--json");
+            if (!v) return 2;
+            jsonOutputs.push_back(v);
         } else if (arg.rfind("--json=", 0) == 0) {
             jsonOutputs.push_back(arg.substr(std::string("--json=").size()));
+        } else if (arg == "--xml") {
+            const char* v = RequireValue(i, "--xml");
+            if (!v) return 2;
+            xmlOutputs.push_back(v);
         } else if (arg.rfind("--xml=", 0) == 0) {
             xmlOutputs.push_back(arg.substr(std::string("--xml=").size()));
         } else if (arg == "--no_color") {
-            useColors = false;
+            colorMode = ColorMode::Never;
+        } else if (arg == "--color") {
+            const char* v = RequireValue(i, "--color");
+            if (!v) return 2;
+            if (!ParseColorMode(v, colorMode)) {
+                std::cerr << "Invalid value for --color: " << v << "\n";
+                return 2;
+            }
+        } else if (arg.rfind("--color=", 0) == 0) {
+            std::string value = arg.substr(std::string("--color=").size());
+            if (!ParseColorMode(value, colorMode)) {
+                std::cerr << "Invalid value for --color: " << value << "\n";
+                return 2;
+            }
+        } else {
+            std::cerr << "Unknown argument: " << arg << "\n";
+            std::cerr << "Run with --help to see supported options.\n";
+            return 2;
         }
+    }
+
+    bool useColors = true;
+    if (colorMode == ColorMode::Never) {
+        useColors = false;
+    } else if (colorMode == ColorMode::Always) {
+        useColors = true;
+    } else {
+        useColors = Detail::ShouldUseColorAuto();
     }
 
     if (!filter.empty()) {
@@ -1022,6 +1575,7 @@ inline int RunWithArgs(int argc, char** argv) {
     Core::TestRegistry::Instance().SetSeed(seed);
     Core::TestRegistry::Instance().SetRepeat(repeat);
     Core::TestRegistry::Instance().EnableFailFast(failFast);
+    Core::TestRegistry::Instance().SetRunDisabled(runDisabled);
     Core::TestRegistry::Instance().SetSlowThreshold(slowWarnMs);
     Core::TestRegistry::Instance().SetUseColors(useColors);
     Core::TestRegistry::Instance().SetTimeout(timeoutMs);
@@ -1033,15 +1587,36 @@ inline int RunWithArgs(int argc, char** argv) {
         Core::TestRegistry::Instance().AddReporter(std::make_shared<Reporters::XMLReporter>(path));
     }
 
+    if (listSuitesOnly) {
+        const auto& tests = Core::TestRegistry::Instance().GetTests();
+        std::vector<std::string> suites;
+        suites.reserve(tests.size());
+        for (const auto& t : tests) {
+            if (std::find(suites.begin(), suites.end(), t.suite) == suites.end()) {
+                suites.push_back(t.suite);
+            }
+        }
+        std::cout << "Suites (" << suites.size() << "):\n";
+        for (const auto& s : suites) {
+            std::cout << "  " << s << "\n";
+        }
+        return 0;
+    }
+
     if (listOnly) {
         const auto& tests = Core::TestRegistry::Instance().GetTests();
-        std::cout << "Listing tests (" << tests.size() << "):" << std::endl;
+        std::cout << "Tests (" << tests.size() << "):\n";
+        std::string currentSuite;
         for (const auto& t : tests) {
-            std::cout << "  " << t.suite << "." << t.name;
+            if (t.suite != currentSuite) {
+                currentSuite = t.suite;
+                std::cout << "\n[" << currentSuite << "]\n";
+            }
+            std::cout << "  " << t.name;
             if (t.disabled) {
                 std::cout << " [DISABLED]";
             }
-            std::cout << std::endl;
+            std::cout << "\n";
         }
         return 0;
     }
@@ -1050,3 +1625,4 @@ inline int RunWithArgs(int argc, char** argv) {
 }
 
 } // namespace AZTest
+#include "UEIntegration.h"

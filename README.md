@@ -10,6 +10,10 @@ Ein leichtgewichtiges und schnelles C++17 Test-Framework in einer einzigen Heade
 - **CMake-Integration:** Lässt sich leicht via `FetchContent` in jedes CMake-Projekt integrieren.
 - **Test-Fixtures:** Verwenden Sie `TEST_F` für Tests, die gemeinsame Setup- und Teardown-Logik teilen (`SetUp()`/`TearDown()`).
 - **Parametrisierte Tests:** Erstellen Sie datengesteuerte Tests mit `TEST_P` und `INSTANTIATE_TEST_SUITE_P`.
+- **Typ-Parametrisierte Tests:** Führen Sie den gleichen Test für verschiedene Datentypen aus mit `TYPED_TEST`.
+- **Matcher System:** Komponierbare Assertions ähnlich wie gMock (`EXPECT_THAT()`).
+- **Mocking Framework:** Eingebautes Mocking mit `MOCK_METHOD()` und `EXPECT_CALL()`.
+- **Property-Based Testing:** Automatisches Fuzzing / randomisierte Eingaben mit `PROPERTY_TEST()`.
 - **Umfangreiche Assertions:** Beinhaltet Prüfungen für Gleichheit, Strings, Fließkommazahlen, Exceptions, Prädikate und mehr.
 - **Scoped Tracing:** Nutzen Sie `SCOPED_TRACE`, um Ihren Fehlermeldungen Kontext hinzuzufügen.
 - **Automatisches `main`:** Das `AZTEST_MAIN()`-Makro generiert automatisch den Einstiegspunkt für den Test-Runner.
@@ -197,6 +201,73 @@ INSTANTIATE_TEST_SUITE_P(
     BehandeltPrimzahlen, // Der Name des Tests
     2, 3, 5, 7, 11, 13   // Die zu testenden Werte
 );
+```
+
+### Typ-parametrisierte Tests (TYPED_TEST)
+
+Führen Sie die gleiche Testlogik für verschiedene Datentypen aus.
+
+```cpp
+TYPED_TEST_SUITE(MatheTest, int, float, double);
+
+TYPED_TEST(MatheTest, Addition) {
+    TypeParam a = 1;
+    TypeParam b = 2;
+    EXPECT_EQ(a + b, 3);
+}
+```
+
+### Matcher System 
+
+Verwenden Sie `EXPECT_THAT(wert, Matcher)` für lesbarere und komponierbare Assertions.
+
+```cpp
+using namespace AZTest::Matchers;
+
+TEST(StringTest, MatcherBeispiel) {
+    std::string text = "Hallo Welt";
+    EXPECT_THAT(text, StartsWith("Hallo"));
+    EXPECT_THAT(text, EndsWith("Welt"));
+    // Logische Operatoren
+    EXPECT_THAT(text, AllOf(HasSubstr("lo"), Not(StartsWith("Tschüss"))));
+}
+```
+
+### Mocking System
+
+Erstellen Sie einfach Mocks von Schnittstellen, um Abhängigkeiten in Tests zu isolieren. AZTest hat ein eingebautes Mocking-System, das kein externes gMock erfordert!
+
+```cpp
+class IDataStore {
+public:
+    virtual ~IDataStore() = default;
+    virtual bool Save(int id) = 0;
+};
+
+class MockDataStore : public IDataStore {
+public:
+    MOCK_METHOD1(bool, Save, int);
+};
+
+TEST(ServiceTest, NutztDataStore) {
+    MockDataStore mock;
+    
+    // Verhalten definieren
+    EXPECT_CALL(mock, Save).WillOnce([](int id) { return id > 0; });
+    
+    EXPECT_TRUE(mock.Save(1));
+}
+```
+
+### Property-Based Testing (Fuzzing)
+
+Nutzen Sie `PROPERTY_TEST` für automatisches Fuzzing / randomisierte Eingaben. Das Framework probiert automatisch X verschiedene zufällige Eingaben, um Ihren Code an den Randbedingungen zu testen.
+
+```cpp
+// Führt den Test 100 Mal mit zufälligen Werten (a und b) aus
+PROPERTY_TEST(Mathe, AdditionIstKommutativ, 100, int a, int b) {
+    EXPECT_EQ(a + b, b + a);
+}
 ```
 
 ## Lizenz

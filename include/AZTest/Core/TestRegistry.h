@@ -5,6 +5,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include "../Environment.h"
 
 namespace AZTest {
 namespace Core {
@@ -33,11 +34,13 @@ private:
     std::vector<TestInfo> tests_;
     std::vector<TestResult> results_;
     std::vector<std::shared_ptr<IReporter>> reporters_;
+    std::vector<AZTest::Environment*> environments_;
     std::string filterPattern_;
     bool shuffle_;
     uint64_t seed_;
     int repeatCount_;
     bool failFast_;
+    bool runDisabled_;
     double slowThresholdMs_;
     bool useColors_;
     double timeoutMs_;
@@ -46,16 +49,19 @@ private:
     bool currentTestFailed_;
     bool currentTestSkipped_;
     std::string currentFailureMsg_;
+    std::vector<TestFailure> currentFailures_;
     std::string currentSkipMsg_;
     std::string currentFile_;
     int currentLine_;
 
     TestRegistry();
+    ~TestRegistry();
 
 public:
     static TestRegistry& Instance();
 
-    // Test registration
+    // Global Environments
+    void AddEnvironment(AZTest::Environment* env);
     void RegisterTest(const std::string& name,
                      const std::string& suite,
                      std::function<void()> func,
@@ -94,6 +100,7 @@ public:
     // Internal state
     bool CurrentTestFailed() const { return currentTestFailed_; }
     void ResetTestState();
+    size_t GetEnvironmentCount() const { return environments_.size(); }
 
     // Filtering
     void SetFilter(const std::string& pattern);
@@ -104,6 +111,8 @@ public:
     void SetSeed(uint64_t seed);
     void SetRepeat(int count);
     void EnableFailFast(bool enable);
+    void SetRunDisabled(bool enable);
+    bool RunDisabled() const { return runDisabled_; }
     void SetSlowThreshold(double ms);
     void SetUseColors(bool enable);
     bool UseColors() const { return useColors_; }

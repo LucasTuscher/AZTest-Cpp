@@ -131,4 +131,86 @@ TEST(DISABLED_MiscFeatures, DisabledTest) {
     EXPECT_EQ(1, 1);
 }
 
+// ============================================================================
+// AZTest V2 Features Demo (Matchers, Mocking, Typed, Property)
+// ============================================================================
+
+// --- Matchers ---
+using namespace AZTest::Matchers;
+
+TEST(FeatureDemos_V2, MatchersDemo) {
+    std::string hw = "Hello World";
+    EXPECT_THAT(hw, StartsWith("Hello"));
+    EXPECT_THAT(hw, EndsWith("World"));
+    EXPECT_THAT(hw, AllOf(HasSubstr("lo W"), Not(StartsWith("Tschuss"))));
+    EXPECT_THAT(3.14159f, FloatEq(3.14159f));
+    
+    std::vector<int> numbers = {1, 2, 3, 4, 5};
+    EXPECT_THAT(numbers, Contains<std::vector<int>>(3));
+}
+
+// --- Mocking ---
+class IMyService {
+public:
+    virtual ~IMyService() = default;
+    virtual bool DoWork(int id) = 0;
+};
+
+class MockService : public IMyService {
+public:
+    MOCK_METHOD1(bool, DoWork, int);
+};
+
+TEST(FeatureDemos_V2, MockingDemo) {
+    MockService mock;
+    EXPECT_CALL(mock, DoWork).WillOnce([](int id) { return id == 42; });
+    
+    EXPECT_TRUE(mock.DoWork(42));
+    EXPECT_FALSE(mock.DoWork(1));
+    EXPECT_FALSE(mock.DoWork(99));
+    
+    EXPECT_EQ(AZTest::Mock::MockRegistry::Instance().GetCallCount("DoWork"), 3);
+}
+
+// --- Property Based Testing / Fuzzing ---
+PROPERTY_TEST(FeatureDemos_V2, PropertyTestMath, 50, int a, int b) {
+    // This will run 50 times with random integers for a and b
+    EXPECT_EQ(a + b, b + a);
+    int diff = a - b;
+    int diff2 = -(b - a);
+    EXPECT_EQ(diff, diff2);
+}
+
+// --- Typed Tests ---
+TYPED_TEST_SUITE(TypeDemoTest, int, float, double);
+
+TYPED_TEST(TypeDemoTest, TypeSpecificLogic) {
+    TypeParam a = 1;
+    TypeParam b = 2;
+    EXPECT_EQ(a + b, 3);
+}
+
+// --- Global Environments ---
+class MyGlobalEnvironment : public AZTest::Environment {
+public:
+    void SetUp() override {
+        // This is printed once before any test starts
+        std::cout << "[GLOBAL SETUP] Initializing resources..." << std::endl;
+    }
+    void TearDown() override {
+        // This is printed once after all tests finish
+        std::cout << "[GLOBAL TEARDOWN] Cleaning up resources..." << std::endl;
+    }
+};
+
+// Register it (the framework takes ownership)
+struct MyGlobalEnvRegistrar {
+    MyGlobalEnvRegistrar() {
+        AZTest::AddGlobalTestEnvironment(new MyGlobalEnvironment());
+    }
+};
+static MyGlobalEnvRegistrar g_env_registrar;
+
 AZTEST_MAIN();
+
+
