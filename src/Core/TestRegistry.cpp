@@ -7,8 +7,8 @@
 #include <random>
 #include <future>
 #include <thread>
- #include <sstream>
- #include <unordered_map>
+#include <sstream>
+#include <unordered_map>
 
 namespace AZTest {
 namespace Core {

@@ -1,15 +1,15 @@
 #pragma once
 
 // ============================================================================
-// AZTest V2 Forwarding Header
+// AZTest V2 Forwarding Header (Weiterleitungs-Header)
 // ============================================================================
 // 
-// AZTest is no longer a single-header library. 
-// Please configure CMake to link the `AZTest` target and use:
-// #include <AZTest/AZTest.h>
+// AZTest ist keine Single-Header-Library mehr. 
+// Bitte konfigurieren Sie CMake so, dass das Ziel `AZTest` verlinkt wird,
+// und nutzen Sie: #include <AZTest/AZTest.h>
 //
-// This file is kept temporarily for backward compatibility 
-// for IDE intellisense if the include paths are misconfigured.
+// Diese Datei wird vorübergehend zur Abwärtskompatibilität für die 
+// IDE-Intellisense beibehalten, falls die Include-Pfade falsch konfiguriert sind.
 // ============================================================================
 
 #include "include/AZTest/AZTest.h"
