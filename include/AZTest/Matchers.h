@@ -69,6 +69,24 @@ public:
     std::string Describe() const override { return "is less than " + PrintValue(expected_); }
 };
 
+template <typename T>
+class GeMatcher : public MatcherBase<T> {
+    T expected_;
+public:
+    explicit GeMatcher(T expected) : expected_(std::move(expected)) {}
+    bool Match(const T& actual) const override { return actual >= expected_; }
+    std::string Describe() const override { return "is greater than or equal to " + PrintValue(expected_); }
+};
+
+template <typename T>
+class LeMatcher : public MatcherBase<T> {
+    T expected_;
+public:
+    explicit LeMatcher(T expected) : expected_(std::move(expected)) {}
+    bool Match(const T& actual) const override { return actual <= expected_; }
+    std::string Describe() const override { return "is less than or equal to " + PrintValue(expected_); }
+};
+
 class StartsWithMatcher : public MatcherBase<std::string> {
     std::string prefix_;
 public:
@@ -109,6 +127,54 @@ public:
         return false;
     }
     std::string Describe() const override { return "contains element " + PrintValue(elem_); }
+};
+
+// Container matchers
+template <typename Container, typename InnerMatcher>
+class EachMatcher : public MatcherBase<Container> {
+    InnerMatcher inner_;
+public:
+    explicit EachMatcher(InnerMatcher m) : inner_(std::move(m)) {}
+    bool Match(const Container& actual) const override {
+        for (const auto& item : actual) {
+            if (!inner_.Match(item)) return false;
+        }
+        return true;
+    }
+    std::string Describe() const override { return "each element " + inner_.Describe(); }
+};
+
+template <typename Container>
+class SizeIsMatcher : public MatcherBase<Container> {
+    std::size_t expected_;
+public:
+    explicit SizeIsMatcher(std::size_t n) : expected_(n) {}
+    bool Match(const Container& actual) const override { return actual.size() == expected_; }
+    std::string Describe() const override { return "has size " + std::to_string(expected_); }
+};
+
+template <typename Container>
+class ElementsAreMatcher : public MatcherBase<Container> {
+    std::vector<typename Container::value_type> expected_;
+public:
+    explicit ElementsAreMatcher(std::vector<typename Container::value_type> expected)
+        : expected_(std::move(expected)) {}
+    bool Match(const Container& actual) const override {
+        if (actual.size() != expected_.size()) return false;
+        auto it = actual.begin();
+        for (std::size_t i = 0; i < expected_.size(); ++i, ++it) {
+            if (!(*it == expected_[i])) return false;
+        }
+        return true;
+    }
+    std::string Describe() const override {
+        std::string res = "elements are [";
+        for (std::size_t i = 0; i < expected_.size(); ++i) {
+            if (i > 0) res += ", ";
+            res += PrintValue(expected_[i]);
+        }
+        return res + "]";
+    }
 };
 
 // Logical Combinators
@@ -210,6 +276,12 @@ Matcher<T> Gt(T expected) { return Matcher<T>(std::make_shared<GtMatcher<T>>(std
 template <typename T>
 Matcher<T> Lt(T expected) { return Matcher<T>(std::make_shared<LtMatcher<T>>(std::move(expected))); }
 
+template <typename T>
+Matcher<T> Ge(T expected) { return Matcher<T>(std::make_shared<GeMatcher<T>>(std::move(expected))); }
+
+template <typename T>
+Matcher<T> Le(T expected) { return Matcher<T>(std::make_shared<LeMatcher<T>>(std::move(expected))); }
+
 inline Matcher<std::string> StartsWith(std::string prefix) { return Matcher<std::string>(std::make_shared<StartsWithMatcher>(std::move(prefix))); }
 inline Matcher<std::string> EndsWith(std::string suffix) { return Matcher<std::string>(std::make_shared<EndsWithMatcher>(std::move(suffix))); }
 inline Matcher<std::string> HasSubstr(std::string substr) { return Matcher<std::string>(std::make_shared<HasSubstrMatcher>(std::move(substr))); }
@@ -217,6 +289,23 @@ inline Matcher<std::string> HasSubstr(std::string substr) { return Matcher<std::
 template <typename Container, typename Element>
 Matcher<Container> Contains(Element elem) {
     return Matcher<Container>(std::make_shared<ContainsMatcher<Container, Element>>(std::move(elem)));
+}
+
+template <typename Container, typename ElemT>
+Matcher<Container> Each(Matcher<ElemT> inner) {
+    return Matcher<Container>(std::make_shared<EachMatcher<Container, Matcher<ElemT>>>(std::move(inner)));
+}
+
+template <typename Container>
+Matcher<Container> SizeIs(std::size_t n) {
+    return Matcher<Container>(std::make_shared<SizeIsMatcher<Container>>(n));
+}
+
+template <typename Container, typename... Args>
+Matcher<Container> ElementsAre(Args&&... args) {
+    using Elem = typename Container::value_type;
+    std::vector<Elem> expected = { static_cast<Elem>(std::forward<Args>(args))... };
+    return Matcher<Container>(std::make_shared<ElementsAreMatcher<Container>>(std::move(expected)));
 }
 
 template <typename T, typename... Args>

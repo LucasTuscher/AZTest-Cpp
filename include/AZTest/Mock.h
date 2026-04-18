@@ -7,6 +7,7 @@
 #include <functional>
 #include <stdexcept>
 #include <typeindex>
+#include <mutex>
 
 namespace AZTest {
 namespace Mock {
@@ -17,6 +18,7 @@ struct MockCallRecord {
 };
 
 class MockRegistry {
+    std::mutex mtx_;
 public:
     static MockRegistry& Instance() {
         static MockRegistry instance;
@@ -24,12 +26,15 @@ public:
     }
     std::map<std::string, MockCallRecord> records;
     void RecordCall(const std::string& name) {
+        std::lock_guard<std::mutex> lock(mtx_);
         records[name].callCount++;
     }
     int GetCallCount(const std::string& name) {
+        std::lock_guard<std::mutex> lock(mtx_);
         return records[name].callCount;
     }
     void Clear() {
+        std::lock_guard<std::mutex> lock(mtx_);
         records.clear();
     }
 };

@@ -712,6 +712,10 @@ public:
         } \
     } while(0)
 
+// Alias for EXPECT_RANGE_EQ — works with any pair of containers
+#define EXPECT_CONTAINER_EQ(a, b) EXPECT_RANGE_EQ(a, b)
+#define ASSERT_CONTAINER_EQ(a, b) ASSERT_RANGE_EQ(a, b)
+
 #define EXPECT_THROW(statement, exception_type) \
     do { \
         bool AZTEST_UNIQUE_NAME(caughtKind_) = false; \
@@ -1294,6 +1298,30 @@ inline bool ExecuteDeathTest(F&& f, std::string& deathMessage) {
 // ============================================================================
 
 #define ENGINE_BENCHMARK(name) AZTest::Utils::Benchmark AZTEST_UNIQUE_NAME(bench_)(name)
+#define AZTEST_BENCHMARK(name)  ENGINE_BENCHMARK(name)
+
+// ============================================================================
+// TEST TAGS
+// ============================================================================
+//
+// Attach searchable tags to a test so you can run subsets via --include_tag /
+// --exclude_tag without changing filter patterns.
+//
+// Usage:
+//   AZTEST_TAG(MathSuite, Addition, "fast", "unit");
+//
+// Must be placed at namespace scope (outside any function), in the same
+// translation unit as the test.
+//
+#define AZTEST_TAG(Suite, Name, ...) \
+    namespace { \
+    struct AZTEST_CONCAT3(AZTagReg_, Suite, AZTEST_CONCAT(_, Name)) { \
+        AZTEST_CONCAT3(AZTagReg_, Suite, AZTEST_CONCAT(_, Name))() { \
+            AZTest::Core::TestRegistry::Instance().AddTags( \
+                #Suite, #Name, std::vector<std::string>{__VA_ARGS__}); \
+        } \
+    } AZTEST_CONCAT3(azTagReg_, Suite, AZTEST_CONCAT(_, Name)); \
+    } // namespace
 
 #define PERFORMANCE_TEST(suite_name, test_name, iterations) \
     TEST(suite_name, test_name) { \
@@ -1419,8 +1447,11 @@ inline int RunWithArgs(int argc, char** argv) {
     bool runDisabled = false;
     double slowWarnMs = 0.0;
     double timeoutMs = 0.0;
+    int parallelWorkers = 1;
     std::vector<std::string> jsonOutputs;
     std::vector<std::string> xmlOutputs;
+    std::vector<std::string> includeTags;
+    std::vector<std::string> excludeTags;
     enum class ColorMode { Auto, Always, Never };
     ColorMode colorMode = ColorMode::Auto;
 
@@ -1429,29 +1460,35 @@ inline int RunWithArgs(int argc, char** argv) {
             << "AZTest " << VersionString() << "\n"
             << "Usage: <test-binary> [options]\n\n"
             << "Options:\n"
-            << "  --help                 Show this help and exit\n"
-            << "  --version              Show version and exit\n"
-            << "  --list                 List tests (grouped by suite) and exit\n"
-            << "  --list_suites          List unique suites and exit\n"
-            << "  --filter <pattern>     Wildcard filter (e.g. Physics.*, *.SlowTest)\n"
-            << "  --filter=<pattern>     Same as above\n"
-            << "  --shuffle              Shuffle test order\n"
-            << "  --seed <n>             Seed for shuffling\n"
-            << "  --seed=<n>             Same as above\n"
-            << "  --repeat <n>           Repeat all tests n times\n"
-            << "  --repeat=<n>           Same as above\n"
-            << "  --fail_fast            Stop on first failure\n"
-            << "  --run_disabled         Run DISABLED_ tests instead of skipping\n"
-            << "  --slow <ms>            Warn for tests slower than this threshold\n"
-            << "  --slow=<ms>            Same as above\n"
-            << "  --timeout <ms>         Fail tests that exceed this runtime\n"
-            << "  --timeout=<ms>         Same as above\n"
-            << "  --json <path>          Write results as JSON to path\n"
-            << "  --json=<path>          Same as above\n"
-            << "  --xml <path>           Write results as JUnit XML to path\n"
-            << "  --xml=<path>           Same as above\n"
-            << "  --color <mode>         auto|always|never (default: auto)\n"
-            << "  --color=<mode>         Same as above\n";
+            << "  --help                     Show this help and exit\n"
+            << "  --version                  Show version and exit\n"
+            << "  --list                     List tests (grouped by suite) and exit\n"
+            << "  --list_suites              List unique suites and exit\n"
+            << "  --filter <pattern>         Wildcard filter; separate with ':' for multiple\n"
+            << "  --filter=<pattern>         (e.g. Physics.*  or  Math.*:Physics.*)\n"
+            << "  --include_tag <tag>        Only run tests with this tag (repeatable)\n"
+            << "  --include_tag=<tag>        Same as above\n"
+            << "  --exclude_tag <tag>        Skip tests with this tag (repeatable)\n"
+            << "  --exclude_tag=<tag>        Same as above\n"
+            << "  --parallel <n>             Run up to N tests concurrently per suite\n"
+            << "  --parallel=<n>             Same as above\n"
+            << "  --shuffle                  Shuffle test order\n"
+            << "  --seed <n>                 Seed for shuffling\n"
+            << "  --seed=<n>                 Same as above\n"
+            << "  --repeat <n>               Repeat all tests n times\n"
+            << "  --repeat=<n>               Same as above\n"
+            << "  --fail_fast                Stop on first failure\n"
+            << "  --run_disabled             Run DISABLED_ tests instead of skipping\n"
+            << "  --slow <ms>                Warn for tests slower than this threshold\n"
+            << "  --slow=<ms>                Same as above\n"
+            << "  --timeout <ms>             Fail tests that exceed this runtime\n"
+            << "  --timeout=<ms>             Same as above\n"
+            << "  --json <path>              Write results as JSON to path\n"
+            << "  --json=<path>              Same as above\n"
+            << "  --xml <path>               Write results as JUnit XML to path\n"
+            << "  --xml=<path>               Same as above\n"
+            << "  --color <mode>             auto|always|never (default: auto)\n"
+            << "  --color=<mode>             Same as above\n";
     };
 
     auto ParseColorMode = [](const std::string& value, ColorMode& out) -> bool {
@@ -1537,6 +1574,24 @@ inline int RunWithArgs(int argc, char** argv) {
             xmlOutputs.push_back(v);
         } else if (arg.rfind("--xml=", 0) == 0) {
             xmlOutputs.push_back(arg.substr(std::string("--xml=").size()));
+        } else if (arg.rfind("--include_tag=", 0) == 0) {
+            includeTags.push_back(arg.substr(std::string("--include_tag=").size()));
+        } else if (arg == "--include_tag") {
+            const char* v = RequireValue(i, "--include_tag");
+            if (!v) return 2;
+            includeTags.push_back(v);
+        } else if (arg.rfind("--exclude_tag=", 0) == 0) {
+            excludeTags.push_back(arg.substr(std::string("--exclude_tag=").size()));
+        } else if (arg == "--exclude_tag") {
+            const char* v = RequireValue(i, "--exclude_tag");
+            if (!v) return 2;
+            excludeTags.push_back(v);
+        } else if (arg.rfind("--parallel=", 0) == 0) {
+            parallelWorkers = std::max(1, std::stoi(arg.substr(std::string("--parallel=").size())));
+        } else if (arg == "--parallel") {
+            const char* v = RequireValue(i, "--parallel");
+            if (!v) return 2;
+            parallelWorkers = std::max(1, std::stoi(v));
         } else if (arg == "--no_color") {
             colorMode = ColorMode::Never;
         } else if (arg == "--color") {
@@ -1579,6 +1634,9 @@ inline int RunWithArgs(int argc, char** argv) {
     Core::TestRegistry::Instance().SetSlowThreshold(slowWarnMs);
     Core::TestRegistry::Instance().SetUseColors(useColors);
     Core::TestRegistry::Instance().SetTimeout(timeoutMs);
+    Core::TestRegistry::Instance().SetParallelWorkers(parallelWorkers);
+    if (!includeTags.empty()) Core::TestRegistry::Instance().SetIncludeTags(includeTags);
+    if (!excludeTags.empty()) Core::TestRegistry::Instance().SetExcludeTags(excludeTags);
 
     for (const auto& path : jsonOutputs) {
         Core::TestRegistry::Instance().AddReporter(std::make_shared<Reporters::JSONReporter>(path));
