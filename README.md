@@ -607,7 +607,3 @@ AZTest-Cpp/
 │   └── FixtureExample.cpp
 └── docs/                  # Detaillierte Dokumentation
 ```
-
-## Lizenz
-
-AZTest wird unter der MIT-Lizenz veröffentlicht. Siehe [LICENSE](LICENSE) für Details.
